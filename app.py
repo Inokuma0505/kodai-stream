@@ -6,7 +6,7 @@ import pulp
 st.set_page_config(page_title="集合駅 最適化デモ（PuLP × Streamlit）", layout="wide")
 
 st.title("集合駅 最適化デモ")
-st.caption("PuLPの0-1最適化をStreamlitでWeb化（重みスライダー付き）")
+st.caption("PuLPの0-1最適化をStreamlitでWeb化（単一スライダー w：時間 w / 運賃 1-w）")
 
 # --- 既定データ ---
 default_I = ['錦糸町', '大崎', '池袋', '府中本町', '神田', '千駄ヶ谷' ,'渋谷', '登戸']
@@ -23,7 +23,7 @@ default_Time = [
     [22, 25, 33, 60, 50, 29, 48, 48],
 ]
 
-# ※ 質問文の Cost 6行目に9列ありましたが Gat=8 に合わせて 8 列に調整済み
+# ※ Cost 6行目は8列に調整済み
 default_Cost = [
     [230, 260, 230, 360, 170, 230, 180, 230],
     [180, 170, 210, 320, 180, 210, 180, 150],
@@ -41,9 +41,8 @@ with st.sidebar:
     time_limit = st.number_input("各出発駅の時間上限（分）", min_value=1, value=30, step=1)
     cost_limit = st.number_input("各出発駅の運賃上限（円）", min_value=1, value=999, step=1)
     st.markdown("---")
-    w_time = st.slider("時間範囲の重み  w_time", min_value=0.0, max_value=10.0, value=1.0, step=0.1)
-    w_cost = st.slider("運賃範囲の重み  w_cost", min_value=0.0, max_value=10.0, value=1.0, step=0.1)
-    st.caption("※ 単位の違いが気になる場合は、ここでバランスを調整してください。")
+    w = st.slider("重み w（時間 = w, 運賃 = 1 - w）", min_value=0.0, max_value=1.0, value=0.5, step=0.01)
+    st.caption(f"現在の重み：時間 = {w:.2f}, 運賃 = {1-w:.2f}（合計=1.00）")
     st.markdown("---")
     solve_btn = st.button("最適化を実行", type="primary")
 
@@ -104,7 +103,7 @@ if not valid_cost:
     st.error(cost_msg)
 
 # --- 最適化 ---
-def solve(Time_mat, Cost_mat, I, J, time_limit, cost_limit, w_time, w_cost):
+def solve(Time_mat, Cost_mat, I, J, time_limit, cost_limit, w):
     problem = pulp.LpProblem("example", pulp.LpMinimize)
 
     # 変数 x_j ∈ {0,1}
@@ -127,6 +126,10 @@ def solve(Time_mat, Cost_mat, I, J, time_limit, cost_limit, w_time, w_cost):
         time_ranges.append(max(col_time) - min(col_time))
         cost_ranges.append(max(col_cost) - min(col_cost))
 
+    # 重み：時間 = w, 運賃 = 1 - w（合計1）
+    w_time = w
+    w_cost = 1.0 - w
+
     # 目的関数：w_time * range(Time[:,j]) + w_cost * range(Cost[:,j])
     problem += pulp.lpSum((w_time * time_ranges[j] + w_cost * cost_ranges[j]) * x[j]
                           for j in range(len(J)))
@@ -135,7 +138,7 @@ def solve(Time_mat, Cost_mat, I, J, time_limit, cost_limit, w_time, w_cost):
     solver = pulp.PULP_CBC_CMD(msg=False)
     status = problem.solve(solver)
 
-    return problem, x, status, time_ranges, cost_ranges
+    return problem, x, status, time_ranges, cost_ranges, w_time, w_cost
 
 if solve_btn:
     if valid_time and valid_cost and Dep > 0 and Gat > 0:
@@ -143,14 +146,14 @@ if solve_btn:
         Cost_mat = Cost_df.values.tolist()
 
         try:
-            problem, x, status, time_ranges, cost_ranges = solve(
-                Time_mat, Cost_mat, I, J, time_limit, cost_limit, w_time, w_cost
+            problem, x, status, time_ranges, cost_ranges, w_time, w_cost = solve(
+                Time_mat, Cost_mat, I, J, time_limit, cost_limit, w
             )
             st.markdown("---")
             st.subheader("結果")
 
             st.write("**解状態**：", pulp.LpStatus[status])
-            st.write(f"**重み**： w_time = **{w_time:.1f}**,  w_cost = **{w_cost:.1f}**")
+            st.write(f"**重み**： 時間 = **{w_time:.2f}**, 運賃 = **{w_cost:.2f}**（合計=1.00）")
             if pulp.LpStatus[status] == "Optimal":
                 chosen_j = None
                 for j in range(Gat):
